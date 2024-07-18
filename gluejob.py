@@ -9,23 +9,40 @@ import pandas as pd
 from io import BytesIO
 
 def read_all_objects_in_path():
-    logger.info(f"_______ READING ALL FILES FROM BUCKET {env['bucket']}, FOLDER {env['path']} _______")
-    response = s3.list_objects_v2(Bucket=env['bucket'],Prefix=f"specialized/incidents/company=Locaweb/{env['path']}")
+    logger.info(f"_______ READING ALL FILES FROM BUCKET {env['bucket']}, FOLDER {env['path']}, TABLE {env['table_name']} _______")
+    response = s3.list_objects_v2(Bucket=env['bucket'],Prefix=f"{env['path']}{env['table_name']}")
     s3_objects = response['Contents']
 
     return s3_objects
 
-def convert_to_days(s3_objects):
-    logger.info(f"_______ CONVERTING ALL OBJECTS IN {env['path']} TO DAYS _______")
+def convert_to_partitions(s3_objects):
+
+    check_for()
+
+    logger.info(f"_______ {env['job_mode']}ing ALL OBJECTS IN {env['table_name']} _______")
 
     all_dfs = []
-
+    
     for item in s3_objects:
+        # verifique o nivel máximo atual de particionamento e se esse e igual ao pedido
+        
         response = s3.get_object(Bucket=env['bucket'],Key=item['Key'])
         body = BytesIO(response['Body'].read())
-        month_df = pd.read_parquet(body)
-        sorted_df = month_df.sort_values(by='created_at')
+        data_frame = pd.read_parquet(body)
+        data_frame['created_at'] = pd.to_datetime(data_frame['created_at'])
+        
+        grouped_df = data_frame.groupby(pd.Grouper(key='created_at', freq='D'))
 
+        separated_dfs = []
+        for date, group in grouped_df:
+            separated_dfs.append(group.copy())
+
+        for i, day_df in enumerate(separated_dfs, start=1):
+            logger.info(f"DataFrame for Day {i}:")
+            logger.info(str(day_df))
+            logger.info()
+
+'''
         last_day = -1
         new_dfs = []
         index = -1
@@ -46,7 +63,10 @@ def convert_to_days(s3_objects):
         #logger.info(f"_______ Month {month} _______")
         all_dfs.append([month, new_dfs])
 
-    return all_dfs
+    return all_dfs'''
+
+def check_for():
+    pass
 
 def upload_days_to_s3(all_dfs):
 
@@ -65,7 +85,7 @@ def upload_days_to_s3(all_dfs):
 
 
 ## @params: [JOB_NAME]
-env = getResolvedOptions(sys.argv, ['JOB_NAME','bucket','convert_to','path'])
+env = getResolvedOptions(sys.argv, ['JOB_NAME','bucket','table_name','job_mode', 'path'])
 
 sc = SparkContext()
 glueContext = GlueContext(sc)
@@ -74,15 +94,15 @@ job = Job(glueContext)
 job.init(env['JOB_NAME'], env)
 
 logger = glueContext.get_logger()
-logger.info(f"***INITIALIZING GLUEJOB SCRIPT***     Parameters: Bucket = {env['bucket']}, Path = {env['path']}, Convert to = {env['convert_to']}")
+logger.info(f"***INITIALIZING GLUEJOB SCRIPT***     Parameters: Bucket = {env['bucket']}, Path = {env['path']}, Table = {env['table_name']} Convert to = {env['job_mode']}")
 
 s3 = boto3.client('s3')
 
 objects = read_all_objects_in_path()
 
-if env['convert_to'] == 'Days':
-    converted_dfs = convert_to_days(objects)
-    upload_days_to_s3(converted_dfs)
+
+converted_dfs = convert_to_partitions(objects)
+#upload_days_to_s3(converted_dfs)
 
 
 
