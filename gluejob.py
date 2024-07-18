@@ -9,12 +9,17 @@ import pandas as pd
 from io import BytesIO
 
 def read_all_objects_in_path():
+    logger.info(f"_______ READING ALL FILES FROM BUCKET {env['bucket']}, FOLDER {env['path']} _______")
     response = s3.list_objects_v2(Bucket=env['bucket'],Prefix=f"specialized/incidents/company=Locaweb/{env['path']}")
     s3_objects = response['Contents']
 
     return s3_objects
 
 def convert_to_days(s3_objects):
+    logger.info(f"_______ CONVERTING ALL OBJECTS IN {env['path']} TO DAYS _______")
+
+    all_dfs = []
+
     for item in s3_objects:
         response = s3.get_object(Bucket=env['bucket'],Key=item['Key'])
         body = BytesIO(response['Body'].read())
@@ -26,17 +31,36 @@ def convert_to_days(s3_objects):
         index = -1
 
         for i in range(len(sorted_df['created_at'])):
-            if sorted_df['created_at'].iloc[i].split(' ')[0].split('-')[2] == last_day:
-                new_dfs[index] = pd.concat([sorted_df.iloc[[i]],new_dfs[index]],ignore_index=True)
+            day = sorted_df['created_at'].iloc[i].split(' ')[0].split('-')[2]
+            if day == last_day:
+                new_dfs[index][1] = pd.concat([sorted_df.iloc[[i]],new_dfs[index][1]],ignore_index=True)
             else:
-                new_dfs.append(pd.DataFrame(sorted_df.iloc[[i]]))
-                last_day = sorted_df['created_at'].iloc[i].split(' ')[0].split('-')[2]
+                new_dfs.append([day, pd.DataFrame(sorted_df.iloc[[i]])])
+                last_day = day
                 index += 1
 
-        for i in new_dfs:
-            logger.info(str(i['created_at']))
+        #for i in new_dfs:
+            #logger.info(str(i[1]['created_at']))
 
-        logger.info(f"_______ Month {new_dfs[0]['created_at'].iloc[0].split(' ')[0].split('-')[1]}")
+        month = new_dfs[0][1]['created_at'].iloc[0].split(' ')[0].split('-')[1]
+        #logger.info(f"_______ Month {month} _______")
+        all_dfs.append([month, new_dfs])
+
+    return all_dfs
+
+def upload_days_to_s3(all_dfs):
+
+    key = f"specialized/incidents/company=Locaweb/{env['path']}test_folder/"
+    s3.put_object(Bucket=env['bucket'], Key=key)
+
+    logger.info(f"_______ UPLOADING ALL OBJECTS IN all_dfs TO {key} _______")
+    
+    for month in all_dfs:
+        s3.put_object(Bucket=env['bucket'],Key=f"{key}month={month[0]}/")
+        for day in month[1]:
+            parquet_bytes = BytesIO(day[1].to_parquet())
+
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key=f"{key}month={month[0]}/day={day[0]}.parquet")
 
 
 
@@ -57,7 +81,9 @@ s3 = boto3.client('s3')
 objects = read_all_objects_in_path()
 
 if env['convert_to'] == 'Days':
-    convert_to_days(objects)
+    converted_dfs = convert_to_days(objects)
+    upload_days_to_s3(converted_dfs)
+
 
 
 logger.info("***FINISHED GLUEJOB SCRIPT***")
