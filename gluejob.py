@@ -9,14 +9,16 @@ import pandas as pd
 from io import BytesIO
 
 def read_all_objects_in_path():
-    response = s3.list_objects_v2(Bucket=env['bucket'],Prefix=f"specialized/interactions/company=Locaweb/{env['path']}")
+    response = s3.list_objects_v2(Bucket=env['bucket'],Prefix=f"specialized/incidents/company=Locaweb/{env['path']}")
     s3_objects = response['Contents']
 
     return s3_objects
 
-def convert_to_days(objects):
-    for item in objects:
-        month_df = pd.DataFrame(data=item['Key'])
+def convert_to_days(s3_objects):
+    for item in s3_objects:
+        response = s3.get_object(Bucket=env['bucket'],Key=item['Key'])
+        body = BytesIO(response['Body'].read())
+        month_df = pd.read_parquet(body)
         sorted_df = month_df.sort_values(by='created_at')
 
         last_day = -1
@@ -24,16 +26,18 @@ def convert_to_days(objects):
         index = -1
 
         for i in range(len(sorted_df['created_at'])):
-            if sorted_df['created_at'].iloc[i].item() == last_day:
+            if sorted_df['created_at'].iloc[i].split(' ')[0].split('-')[2] == last_day:
                 new_dfs[index] = pd.concat([sorted_df.iloc[[i]],new_dfs[index]],ignore_index=True)
             else:
                 new_dfs.append(pd.DataFrame(sorted_df.iloc[[i]]))
-                last_day = sorted_df['created_at'].iloc[i]
+                last_day = sorted_df['created_at'].iloc[i].split(' ')[0].split('-')[2]
                 index += 1
 
         for i in new_dfs:
-            logger.info(str(i))
-            
+            logger.info(str(i['created_at']))
+
+        logger.info(f"_______ Month {new_dfs[0]['created_at'].iloc[0].split(' ')[0].split('-')[1]}")
+
 
 
 ## @params: [JOB_NAME]
