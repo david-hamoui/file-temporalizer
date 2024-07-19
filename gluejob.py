@@ -85,13 +85,17 @@ def check_for():
 def upload_partitions_to_s3(list_of_all_partitions):
     logger.info(f"_______ UPLOADING ALL PARTITIONS TO {env['table_name']} _______")
 
+    key = f"{env['path']}/{env['table_name']}/company=Locaweb/new-folder/{env['table_name']}_year="
+
     for date,df in list_of_all_partitions:
         parquet_bytes = BytesIO(df.to_parquet())
 
         if env['job_mode'] == 'Years':
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{env['path']}/{env['table_name']}/company=Locaweb/new-folder/{env['table_name']}_{env['job_mode'].lower()[:-1]}={date.year}/{env['table_name']}.parquet")
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}{date.year}/{env['table_name']}.parquet")
+        elif env['job_mode'] == 'Months':
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}{date.year}/{env['table_name']}_month={date.month}/{env['table_name']}.parquet")
         elif env['job_mode'] == 'Days':
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{env['path']}/{env['table_name']}/company=Locaweb/new-folder/{env['table_name']}_year={date.year}/{env['table_name']}_month={date.month}/{env['job_mode'].lower()[:-1]}={date.day}/{env['table_name']}.parquet")
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}{date.year}/{env['table_name']}_month={date.month}/{env['table_name']}_day={date.day}/{env['table_name']}.parquet")
 
 
     '''
