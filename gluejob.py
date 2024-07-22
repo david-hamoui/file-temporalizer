@@ -17,14 +17,15 @@ def read_all_objects_in_path():
 
 def convert_to_partitions(s3_objects):
 
-    check_for()
-
     logger.info(f"_______ PARTITIONING ALL OBJECTS IN {env['table_name']} TO {env['job_mode']} _______")
 
     joined_df = pd.DataFrame()
     
     for item in s3_objects:
-        # verifique o nivel máximo atual de particionamento e se esse e igual ao pedido
+        
+        if not check_for_validity(item):
+            logger.info(f"_______ Unvalid job_mode: {env['job_mode']}, table is already converted to {env['job_mode']}, STOPPING JOB _______")
+            return False
         
         response = s3.get_object(Bucket=env['bucket'],Key=item['Key'])
         body = BytesIO(response['Body'].read())
@@ -79,13 +80,16 @@ def convert_to_partitions(s3_objects):
     return all_dfs'''
 
 
-def check_for():
-    pass
+def check_for_validity(item):
+    last_partition = item['Key'].split('/')[-2].split('_')[-1].split('=')[0]
+    if last_partition == env['job_mode'].lower()[:-1]:
+        return False
+    return True
 
 def upload_partitions_to_s3(list_of_all_partitions):
-    logger.info(f"_______ UPLOADING ALL PARTITIONS TO {env['table_name']} _______")
+    logger.info(f"_______ UPLOADING ALL PARTITIONS TO {env['path']}/{env['table_name']}/ _______")
 
-    key = f"{env['path']}/{env['table_name']}/company=Locaweb/new-folder/{env['table_name']}_year="
+    key = f"{env['path']}/{env['table_name']}/company=Locaweb/{env['table_name']}_year="
 
     for date,df in list_of_all_partitions:
         parquet_bytes = BytesIO(df.to_parquet())
@@ -111,6 +115,21 @@ def upload_partitions_to_s3(list_of_all_partitions):
 
             s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key=f"{key}month={month[0]}/day={day[0]}.parquet")'''
 
+def delete_previous_table():
+    logger.info(f"_______ DELETING EXISTING TABLE: {env['path']}/{env['table_name']}/ _______")
+
+    objects_to_delete = s3.list_objects_v2(Bucket=env['bucket'], Prefix=f"{env['path']}/{env['table_name']}/")
+
+    if 'Contents' in objects_to_delete:
+        deleted_objects = []
+
+        for obj in objects_to_delete['Contents']:
+            deleted_objects.append({'Key': obj['Key']})
+
+        s3.delete_objects(Bucket=env['bucket'], Delete={'Objects': deleted_objects})
+    
+    logger.info(f"_______ SUCCESSFULLY DELETED {len(deleted_objects)} OBJECTS FROM {env['path']}/{env['table_name']}/ _______")
+
 
 
 ## @params: [JOB_NAME]
@@ -127,11 +146,14 @@ logger.info(f"***INITIALIZING GLUEJOB SCRIPT***     Parameters: Bucket = {env['b
 
 s3 = boto3.client('s3')
 
-
 objects = read_all_objects_in_path()
 
-partitioned_dfs = convert_to_partitions(objects)
-upload_partitions_to_s3(partitioned_dfs)
+response_from_convertion = convert_to_partitions(objects)
+
+if response_from_convertion != False:
+    delete_previous_table()
+    partitioned_dfs = response_from_convertion
+    upload_partitions_to_s3(partitioned_dfs)
 
 
 
