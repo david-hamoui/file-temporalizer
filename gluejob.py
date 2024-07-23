@@ -11,9 +11,8 @@ from io import BytesIO
 def read_all_objects_in_path():
     logger.info(f"_______ READING ALL FILES FROM BUCKET {env['bucket']}, FOLDER {env['path']}, TABLE {env['table_name']} _______")
     response = s3.list_objects_v2(Bucket=env['bucket'],Prefix=f"{env['path']}/{env['table_name']}/")
-    s3_objects = response['Contents']
 
-    return s3_objects
+    return response
 
 def convert_to_partitions(s3_objects):
 
@@ -32,15 +31,23 @@ def convert_to_partitions(s3_objects):
         data_frame = pd.read_parquet(body)
         data_frame['created_at'] = pd.to_datetime(data_frame['created_at'])
         
+
+        key = item['Key'].split('/')
+        for k in key:
+            if k.startswith('company='):
+                company = k.split('=')[1]
+
+        data_frame['company'] = company
+        
         joined_df = pd.concat(objs=[joined_df,data_frame],ignore_index=True)
     
     joined_df = joined_df.sort_values(by='created_at')
 
-    grouped = joined_df.groupby(by=pd.Grouper(key='created_at',freq=env['job_mode'][0].upper()))
+    grouped = joined_df.groupby(by=[pd.Grouper(key='created_at',freq=env['job_mode'][0].upper()), 'company'])
 
     list_of_all_partitions = []
-    for date,df in grouped:
-        list_of_all_partitions.append([date,df.copy()])
+    for (date,company),df in grouped:
+        list_of_all_partitions.append([date,company,df.copy()])
 
     return list_of_all_partitions
 
@@ -89,17 +96,17 @@ def check_for_validity(item):
 def upload_partitions_to_s3(list_of_all_partitions):
     logger.info(f"_______ UPLOADING ALL PARTITIONS TO {env['path']}/{env['table_name']}/ _______")
 
-    key = f"{env['path']}/{env['table_name']}/company=Locaweb/{env['table_name']}_year="
+    key = f"{env['path']}/{env['table_name']}/"
 
-    for date,df in list_of_all_partitions:
+    for date,company,df in list_of_all_partitions:
         parquet_bytes = BytesIO(df.to_parquet())
 
         if env['job_mode'] == 'Years':
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}{date.year}/{env['table_name']}.parquet")
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company}/{env['table_name']}_year={date.year}/{env['table_name']}.parquet")
         elif env['job_mode'] == 'Months':
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}{date.year}/{env['table_name']}_month={date.month}/{env['table_name']}.parquet")
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company}/{env['table_name']}_year={date.year}/{env['table_name']}_month={date.month}/{env['table_name']}.parquet")
         elif env['job_mode'] == 'Days':
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}{date.year}/{env['table_name']}_month={date.month}/{env['table_name']}_day={date.day}/{env['table_name']}.parquet")
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company}/{env['table_name']}_year={date.year}/{env['table_name']}_month={date.month}/{env['table_name']}_day={date.day}/{env['table_name']}.parquet")
 
 
     '''
@@ -115,10 +122,10 @@ def upload_partitions_to_s3(list_of_all_partitions):
 
             s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key=f"{key}month={month[0]}/day={day[0]}.parquet")'''
 
-def delete_previous_table():
+def delete_previous_files(s3_objects):
     logger.info(f"_______ DELETING EXISTING TABLE: {env['path']}/{env['table_name']}/ _______")
 
-    objects_to_delete = s3.list_objects_v2(Bucket=env['bucket'], Prefix=f"{env['path']}/{env['table_name']}/")
+    objects_to_delete = s3_objects
 
     if 'Contents' in objects_to_delete:
         deleted_objects = []
@@ -148,12 +155,12 @@ s3 = boto3.client('s3')
 
 objects = read_all_objects_in_path()
 
-response_from_convertion = convert_to_partitions(objects)
+response_from_convertion = convert_to_partitions(objects['Contents'])
 
 if response_from_convertion != False:
-    delete_previous_table()
     partitioned_dfs = response_from_convertion
     upload_partitions_to_s3(partitioned_dfs)
+    delete_previous_files(objects)
 
 
 
