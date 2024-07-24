@@ -37,17 +37,17 @@ def convert_to_partitions(s3_objects):
             if k.startswith('company='):
                 company = k.split('=')[1]
 
-        data_frame['company'] = company
+        data_frame['company_temp'] = company
         
         joined_df = pd.concat(objs=[joined_df,data_frame],ignore_index=True)
     
     joined_df = joined_df.sort_values(by='created_at')
 
-    grouped = joined_df.groupby(by=[pd.Grouper(key='created_at',freq=env['job_mode'][0].upper()), 'company'])
+    grouped = joined_df.groupby(by=[pd.Grouper(key='created_at',freq=env['job_mode'][0].upper()), 'company_temp'])
 
     list_of_all_partitions = []
-    for (date,company),df in grouped:
-        list_of_all_partitions.append([date,company,df.copy()])
+    for (date,company_temp),df in grouped:
+        list_of_all_partitions.append([date,company_temp,df.copy()])
 
     return list_of_all_partitions
 
@@ -98,15 +98,16 @@ def upload_partitions_to_s3(list_of_all_partitions):
 
     key = f"{env['path']}/{env['table_name']}/"
 
-    for date,company,df in list_of_all_partitions:
+    for date,company_temp,df in list_of_all_partitions:
+        df = df.drop(columns='company_temp')
         parquet_bytes = BytesIO(df.to_parquet())
 
         if env['job_mode'] == 'Years':
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company}/{env['table_name']}_year={date.year}/{env['table_name']}.parquet")
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company_temp}/{env['table_name']}_year={date.year}/{env['table_name']}.parquet")
         elif env['job_mode'] == 'Months':
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company}/{env['table_name']}_year={date.year}/{env['table_name']}_month={date.month}/{env['table_name']}.parquet")
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company_temp}/{env['table_name']}_year={date.year}/{env['table_name']}_month={date.month}/{env['table_name']}.parquet")
         elif env['job_mode'] == 'Days':
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company}/{env['table_name']}_year={date.year}/{env['table_name']}_month={date.month}/{env['table_name']}_day={date.day}/{env['table_name']}.parquet")
+            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company_temp}/{env['table_name']}_year={date.year}/{env['table_name']}_month={date.month}/{env['table_name']}_day={date.day}/{env['table_name']}.parquet")
 
 
     '''
