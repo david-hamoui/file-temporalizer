@@ -51,42 +51,6 @@ def convert_to_partitions(s3_objects):
 
     return list_of_all_partitions
 
-    '''
-        grouped_df = data_frame.groupby(by=pd.Grouper(key='created_at', freq='D'))
-
-        separated_dfs = []
-        for date, group in grouped_df:
-            separated_dfs.append(group.copy())
-
-        for i, day_df in enumerate(separated_dfs, start=1):
-            logger.info(f"DataFrame for Day {i}:")
-            logger.info(str(day_df))
-            logger.info()'''
-
-    '''
-        last_day = -1
-        new_dfs = []
-        index = -1
-
-        for i in range(len(sorted_df['created_at'])):
-            day = sorted_df['created_at'].iloc[i].split(' ')[0].split('-')[2]
-            if day == last_day:
-                new_dfs[index][1] = pd.concat([sorted_df.iloc[[i]],new_dfs[index][1]],ignore_index=True)
-            else:
-                new_dfs.append([day, pd.DataFrame(sorted_df.iloc[[i]])])
-                last_day = day
-                index += 1
-
-        #for i in new_dfs:
-            #logger.info(str(i[1]['created_at']))
-
-        month = new_dfs[0][1]['created_at'].iloc[0].split(' ')[0].split('-')[1]
-        #logger.info(f"_______ Month {month} _______")
-        all_dfs.append([month, new_dfs])
-
-    return all_dfs'''
-
-
 def check_for_validity(item):
     last_partition = item['Key'].split('/')[-2].split('_')[-1].split('=')[0]
     if last_partition == env['job_mode'].lower()[:-1]:
@@ -109,20 +73,6 @@ def upload_partitions_to_s3(list_of_all_partitions):
         elif env['job_mode'] == 'Days':
             s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key = f"{key}company={company_temp}/{env['table_name']}_year={date.year}/{env['table_name']}_month={date.month}/{env['table_name']}_day={date.day}/{env['table_name']}.parquet")
 
-
-    '''
-    key = f"specialized/incidents/company=Locaweb/{env['path']}test_folder/"
-    s3.put_object(Bucket=env['bucket'], Key=key)
-
-    logger.info(f"_______ UPLOADING ALL OBJECTS IN all_dfs TO {key} _______")
-    
-    for month in all_dfs:
-        s3.put_object(Bucket=env['bucket'],Key=f"{key}month={month[0]}/")
-        for day in month[1]:
-            parquet_bytes = BytesIO(day[1].to_parquet())
-
-            s3.upload_fileobj(Fileobj=parquet_bytes, Bucket=env['bucket'], Key=f"{key}month={month[0]}/day={day[0]}.parquet")'''
-
 def delete_previous_files(s3_objects):
     logger.info(f"_______ DELETING EXISTING TABLE: {env['path']}/{env['table_name']}/ _______")
 
@@ -137,7 +87,6 @@ def delete_previous_files(s3_objects):
         s3.delete_objects(Bucket=env['bucket'], Delete={'Objects': deleted_objects})
     
     logger.info(f"_______ SUCCESSFULLY DELETED {len(deleted_objects)} OBJECTS FROM {env['path']}/{env['table_name']}/ _______")
-
 
 
 ## @params: [JOB_NAME]
@@ -162,8 +111,6 @@ if response_from_convertion != False:
     partitioned_dfs = response_from_convertion
     upload_partitions_to_s3(partitioned_dfs)
     delete_previous_files(objects)
-
-
 
 logger.info("***FINISHED GLUEJOB SCRIPT***")
 job.commit()
